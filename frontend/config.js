@@ -5,8 +5,8 @@ const API_CONFIG = {
     BASE_URL: "http://localhost:3333"
   },
   production: {
-    API_URL: "https://your-backend.onrender.com/api", // Thay bằng URL Render của bạn
-    BASE_URL: "https://your-backend.onrender.com"
+    API_URL: "https://code-web-n-gi-n.onrender.com/api",
+    BASE_URL: "https://code-web-n-gi-n.onrender.com"
   }
 };
 
