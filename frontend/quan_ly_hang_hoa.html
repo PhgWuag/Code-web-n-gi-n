@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Quản lý hàng hóa</title>
+<style>
+body { font-family: Arial; background:#f4f6f8; padding:20px; }
+.container { max-width:1200px; margin:auto; background:#fff; padding:20px; border-radius:8px; }
+h1 { text-align:center; }
+.user-info { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center;
+  background: #e7f3ff; 
+  padding: 12px 16px; 
+  border-radius: 6px; 
+  margin-bottom: 20px;
+}
+.user-name { 
+  font-weight: bold; 
+  color: #333; 
+}
+.btn-logout {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-logout:hover {
+  background: #c82333;
+}
+input { width:100%; padding:8px; margin-bottom:8px; }
+button { padding:6px 12px; margin:2px; cursor:pointer; }
+table { width:100%; border-collapse:collapse; margin-top:20px; }
+th, td { border:1px solid #ccc; padding:6px; text-align:center; }
+th { background:#eee; }
+.summary { background:#f9f9f9; padding:15px; margin-top:20px; border-radius:6px; }
+.note-section { background:#fff3cd; padding:10px; margin:10px 0; border-radius:4px; border:1px solid #ffc107; }
+.note-section textarea { width:100%; padding:8px; resize:vertical; min-height:60px; }
+.edit-note { background:#e7f3ff; padding:8px; margin:5px 0; border-radius:4px; font-style:italic; }
+
+/* MODAL */
+.modal {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+}
+.modal-content {
+  background:#fff;
+  max-width:600px;
+  margin:10% auto;
+  padding:20px;
+  border-radius:6px;
+}
+.history-item {
+  border-bottom:1px solid #ddd;
+  padding:8px 0;
+}
+.history-time { font-weight:bold; }
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>Quản lý hàng hóa</h1>
+
+<div class="user-info">
+  <div>
+    <span style="color: #666;">Xin chào,</span>
+    <span class="user-name" id="userName">User</span>
+  </div>
+  <button class="btn-logout" onclick="dangXuat()">Đăng xuất</button>
+</div>
+
+<input type="date" id="ngayNhap">
+<input type="text" id="tenHang" placeholder="Tên hàng">
+<input type="number" id="soLuongNhap" placeholder="SL nhập">
+<input type="date" id="thoiGianTra">
+<input type="number" id="soLuongTra" placeholder="SL trả">
+
+<div id="noteSection" class="note-section" style="display:none;">
+  <label><b>Ghi chú chỉnh sửa:</b></label>
+  <textarea id="ghiChuSua" placeholder="Nhập lý do chỉnh sửa (VD: Khách trả thêm hàng, Nhập nhầm số lượng, Cập nhật theo hóa đơn mới...)"></textarea>
+</div>
+
+<button id="btnLuu" onclick="luuHoacCapNhat()">Lưu</button>
+
+<table>
+<thead>
+<tr>
+<th>Ngày nhập</th>
+<th>Tên hàng</th>
+<th>SL nhập</th>
+<th>Ngày trả</th>
+<th>SL trả</th>
+<th>Ghi chú</th>
+<th>Hành động</th>
+</tr>
+</thead>
+<tbody id="bang"></tbody>
+</table>
+
+<div class="summary">
+<p>Tổng nhập: <b id="tongNhap">0</b></p>
+<p>Tổng trả: <b id="tongTra">0</b></p>
+<p>Tồn kho: <b id="tonKho">0</b></p>
+</div>
+</div>
+
+<!-- MODAL LỊCH SỬ -->
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <h3>Lịch sử chỉnh sửa</h3>
+    <div id="lichSu"></div>
+    <button onclick="dongModal()">Đóng</button>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script>
+const API_URL = CONFIG.API_URL + "/hanghoa";
+const AUTH_API_URL = CONFIG.API_URL + "/auth";
+
+let danhSach = [];
+let editId = null;
+let token = localStorage.getItem("token");
+let currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+
+// ==================== KIỂM TRA ĐĂNG NHẬP ====================
+if (!token) {
+    window.location.href = "auth.html";
+}
+
+// Hiển thị tên user
+document.getElementById("userName").textContent = currentUser.fullName || currentUser.username || "User";
+
+// ==================== HÀM GỌI API VỚI TOKEN ====================
+async function apiCall(url, options = {}) {
+    const headers = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        ...options.headers
+    };
+
+    try {
+        const response = await fetch(url, { ...options, headers });
+        
+        // Nếu token không hợp lệ, chuyển về trang login
+        if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            alert("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại!");
+            window.location.href = "auth.html";
+            return null;
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("API Error:", error);
+        throw error;
+    }
+}
+
+// ==================== ĐĂNG XUẤT ====================
+function dangXuat() {
+    if (confirm("Bạn có chắc muốn đăng xuất?")) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        window.location.href = "auth.html";
+    }
+}
+
+// ==================== LOAD DỮ LIỆU TỪ API ====================
+async function taiDuLieu() {
+    try {
+        const result = await apiCall(API_URL, { method: "GET" });
+        
+        if (result && result.success) {
+            danhSach = result.data;
+            hienThi();
+            capNhatTongKet(result.summary);
+        }
+    } catch (error) {
+        console.error("Không thể kết nối API:", error);
+        alert("Không thể kết nối đến server. Vui lòng kiểm tra server đã chạy chưa!");
+    }
+}
+
+// ==================== HIỂN THỊ BẢNG ====================
+function hienThi() {
+    bang.innerHTML = "";
+
+    danhSach.forEach((item) => {
+        const noteCount = (item.history || []).filter(h => h.note).length;
+        const noteDisplay = noteCount > 0 ? `${noteCount} ghi chú` : "—";
+
+        bang.innerHTML += `
+        <tr>
+            <td>${item.ngayNhap}</td>
+            <td>${item.tenHang}</td>
+            <td>${item.soLuongNhap}</td>
+            <td>${item.thoiGianTra || ""}</td>
+            <td>${item.soLuongTra}</td>
+            <td>${noteDisplay}</td>
+            <td>
+              <button onclick="batDauSua(${item.id})">Sửa</button>
+              <button onclick="xemLichSu(${item.id})">Xem lịch sử & ghi chú</button>
+              <button onclick="xoaBanGhi(${item.id})" style="background:#dc3545; color:#fff;">Xóa</button>
+            </td>
+        </tr>`;
+    });
+}
+
+// ==================== CẬP NHẬT TỔNG KẾT ====================
+function capNhatTongKet(summary) {
+    if (summary) {
+        document.getElementById("tongNhap").innerText = summary.tongNhap;
+        document.getElementById("tongTra").innerText = summary.tongTra;
+        document.getElementById("tonKho").innerText = summary.tonKho;
+    }
+}
+
+// ==================== BẮT ĐẦU SỬA ====================
+function batDauSua(id) {
+    const item = danhSach.find(h => h.id === id);
+    if (!item) return;
+    
+    ngayNhap.value = item.ngayNhap;
+    tenHang.value = item.tenHang;
+    soLuongNhap.value = item.soLuongNhap;
+    thoiGianTra.value = item.thoiGianTra;
+    soLuongTra.value = item.soLuongTra;
+
+    editId = id;
+    btnLuu.innerText = "Cập nhật";
+    
+    // Hiển thị ô ghi chú khi sửa
+    document.getElementById("noteSection").style.display = "block";
+    document.getElementById("ghiChuSua").value = "";
+}
+
+// ==================== LƯU HOẶC CẬP NHẬT ====================
+async function luuHoacCapNhat() {
+    if (!tenHang.value || !ngayNhap.value) {
+        alert("Thiếu thông tin");
+        return;
+    }
+
+    const data = {
+        ngayNhap: ngayNhap.value,
+        tenHang: tenHang.value,
+        soLuongNhap: soLuongNhap.value || 0,
+        thoiGianTra: thoiGianTra.value,
+        soLuongTra: soLuongTra.value || 0
+    };
+
+    try {
+        let result;
+        
+        // THÊM MỚI
+        if (editId === null) {
+            result = await apiCall(API_URL, {
+                method: "POST",
+                body: JSON.stringify(data)
+            });
+        }
+        // CẬP NHẬT
+        else {
+            const ghiChu = document.getElementById("ghiChuSua").value.trim();
+            if (ghiChu) {
+                data.note = ghiChu;
+            }
+            
+            result = await apiCall(`${API_URL}/${editId}`, {
+                method: "PUT",
+                body: JSON.stringify(data)
+            });
+            
+            editId = null;
+            btnLuu.innerText = "Lưu";
+            document.getElementById("noteSection").style.display = "none";
+        }
+
+        if (result && result.success) {
+            alert(result.message);
+            await taiDuLieu(); // Reload dữ liệu
+            resetForm();
+        } else if (result) {
+            alert("Lỗi: " + result.message);
+        }
+    } catch (error) {
+        console.error("Lỗi:", error);
+        alert("Không thể kết nối đến server!");
+    }
+}
+
+// ==================== XEM LỊCH SỬ ====================
+function xemLichSu(id) {
+    const item = danhSach.find(h => h.id === id);
+    if (!item) return;
+    
+    const lichSu = document.getElementById("lichSu");
+    lichSu.innerHTML = "";
+
+    const history = item.history;
+
+    if (!history || history.length === 0) {
+        lichSu.innerHTML = "<p>Chưa có chỉnh sửa</p>";
+    } else {
+        history.forEach(h => {
+            let noteHtml = "";
+            if (h.note) {
+                noteHtml = `<div class="edit-note">📝 <b>Ghi chú:</b> ${h.note}</div>`;
+            }
+            
+            lichSu.innerHTML += `
+            <div class="history-item">
+              <div class="history-time">${h.time}</div>
+              <ul>
+                ${h.changes.map(c => `<li>${c}</li>`).join("")}
+              </ul>
+              ${noteHtml}
+            </div>`;
+        });
+    }
+
+    modal.style.display = "block";
+}
+
+// ==================== ĐÓNG MODAL ====================
+function dongModal() {
+    modal.style.display = "none";
+}
+
+// ==================== XÓA BẢN GHI ====================
+async function xoaBanGhi(id) {
+    if (!confirm("Bạn có chắc chắn muốn xóa bản ghi này không?")) {
+        return;
+    }
+    
+    try {
+        const result = await apiCall(`${API_URL}/${id}`, {
+            method: "DELETE"
+        });
+        
+        if (result && result.success) {
+            alert(result.message);
+            
+            // Nếu đang sửa bản ghi bị xóa, reset form
+            if (editId === id) {
+                resetForm();
+                editId = null;
+                btnLuu.innerText = "Lưu";
+                document.getElementById("noteSection").style.display = "none";
+            }
+            
+            await taiDuLieu(); // Reload dữ liệu
+        } else if (result) {
+            alert("Lỗi: " + result.message);
+        }
+    } catch (error) {
+        console.error("Lỗi:", error);
+        alert("Không thể kết nối đến server!");
+    }
+}
+
+// ==================== RESET FORM ====================
+function resetForm() {
+    ngayNhap.value = "";
+    tenHang.value = "";
+    soLuongNhap.value = "";
+    thoiGianTra.value = "";
+    soLuongTra.value = "";
+    document.getElementById("ghiChuSua").value = "";
+    document.getElementById("noteSection").style.display = "none";
+    editId = null;
+    btnLuu.innerText = "Lưu";
+}
+
+// ==================== KHỞI TẠO ====================
+taiDuLieu();
+</script>
+
+</body>
+</html>
